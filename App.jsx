@@ -442,6 +442,58 @@ function FieldScene({mapId,mapState,pos,facing,onMove,onAction,onOpenParty}){
 const dpad={fontSize:15,borderRadius:"var(--border-radius-md)",border:"0.5px solid var(--color-border-tertiary)",background:"var(--color-background-primary)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"};
 
 /* ===== バトル演出: タイプ別エフェクト ===== */
+const NENRIKI_FRAME_MS = 180;
+const NENRIKI_FRAMES = [
+  `${import.meta.env.BASE_URL}effects/nenriki/01.png`,
+  `${import.meta.env.BASE_URL}effects/nenriki/02.png`,
+  `${import.meta.env.BASE_URL}effects/nenriki/03.png`,
+  `${import.meta.env.BASE_URL}effects/nenriki/04.png`,
+  `${import.meta.env.BASE_URL}effects/nenriki/05.png`,
+];
+const NENRIKI_DURATION = NENRIKI_FRAMES.length * NENRIKI_FRAME_MS;
+
+function NenrikiAnimation({onComplete}){
+  const [frame,setFrame]=useState(0);
+  const onCompleteRef=useRef(onComplete);
+
+  useEffect(()=>{onCompleteRef.current=onComplete;},[onComplete]);
+
+  useEffect(()=>{
+    const timers=NENRIKI_FRAMES.map((_,index)=>setTimeout(()=>setFrame(index),index*NENRIKI_FRAME_MS));
+    const finishTimer=setTimeout(()=>onCompleteRef.current?.(),NENRIKI_DURATION);
+    return ()=>{
+      timers.forEach(clearTimeout);
+      clearTimeout(finishTimer);
+    };
+  },[]);
+
+  return (
+    <div
+  style={{
+    position:"fixed",
+    inset:0,
+    zIndex:9999,
+    
+    pointerEvents:"none",
+    display:"flex",
+    alignItems:"center",
+    justifyContent:"center",
+    overflow:"hidden",
+  }}
+>
+  <img
+    src={NENRIKI_FRAMES[frame]}
+    alt=""
+    style={{
+      width:"min(90vw, 900px)",
+      height:"min(90vh, 900px)",
+      objectFit:"contain",
+      display:"block",
+    }}
+  />
+</div>
+  );
+}
 function AttackFX({mtype,kind}){
   const t=TYPE_INFO[mtype]||{color:"#888"};
   const n=kind==="spa"?14:8;
@@ -471,6 +523,7 @@ function BattleScene({playerMon,wild,isTrainer,trainerLabel,onEnd}){
   const [flash,setFlash]=useState(false);
   const [floatDmg,setFloatDmg]=useState(null);
   const [entered,setEntered]=useState(false);
+  const [nenrikiAnim,setNenrikiAnim]=useState(false);
   const logRef=useRef(null);
   useEffect(()=>{playBGM(isTrainer?"trainer":"battle");const t=setTimeout(()=>setEntered(true),50);return ()=>clearTimeout(t);},[]);
   useEffect(()=>{if(logRef.current)logRef.current.scrollTop=logRef.current.scrollHeight;},[log]);
@@ -480,10 +533,13 @@ function BattleScene({playerMon,wild,isTrainer,trainerLabel,onEnd}){
   const enemyTurn=(curP)=>{
     setTimeout(()=>{
       const mv=wild.moves[Math.floor(Math.random()*wild.moves.length)];
+      const isNenriki=mv.name==="ねんりき";
+      if(isNenriki)setNenrikiAnim(true);
       setLunge("enemy"); setTimeout(()=>setLunge(null),260);
       setTimeout(()=>{
         const{dmg,mult}=dmgCalc(mv,wStats,pStats,playerMon);
-        playSE("hit"); setFx({mtype:mv.mtype,kind:mv.type,target:"player"}); setTimeout(()=>setFx(null),520);
+        playSE("hit");
+        if(!isNenriki){setFx({mtype:mv.mtype,kind:mv.type,target:"player"});setTimeout(()=>setFx(null),520);}
         setPHit(true);setTimeout(()=>setPHit(false),320);
         if(mult>1.5){setFlash(true);setTimeout(()=>setFlash(false),220);}
         setFloatDmg({target:"player",dmg,mult}); setTimeout(()=>setFloatDmg(null),780);
@@ -492,17 +548,24 @@ function BattleScene({playerMon,wild,isTrainer,trainerLabel,onEnd}){
         const el=effLabel(mult); if(el)addLog(el);
         if(nh<=0){ setFaint("player"); addLog(`${playerMon.name} は たおれた…`); setTimeout(()=>{setPhase("end");setEnd("lose");},800); }
         else setPhase("player");
-      },220);
+      },isNenriki?NENRIKI_DURATION:220);
     },650);
   };
 
   const useMove=mv=>{
-    if(phase!=="player")return; setPhase("anim");
+    if(phase!=="player")return;
+    setPhase("anim");
     if(playerMon.ability==="なまけ" && Math.random()<0.25){ addLog(`${playerMon.name} は 資料を まだ出していない…（なまけ）`); setPhase("enemy"); enemyTurn(pHp); return; }
+    const isNenriki=mv.name==="ねんりき";
+    if(isNenriki){
+  alert("ねんりき発動");
+  setNenrikiAnim(true);
+}
     setLunge("player"); setTimeout(()=>setLunge(null),260);
     setTimeout(()=>{
       const{dmg,mult}=dmgCalc(mv,pStats,wStats,wild);
-      playSE("hit"); setFx({mtype:mv.mtype,kind:mv.type,target:"enemy"}); setTimeout(()=>setFx(null),520);
+      playSE("hit");
+      if(!isNenriki){setFx({mtype:mv.mtype,kind:mv.type,target:"enemy"});setTimeout(()=>setFx(null),520);}
       setWHit(true);setTimeout(()=>setWHit(false),320);
       if(mult>1.5){setFlash(true);setTimeout(()=>setFlash(false),220);}
       setFloatDmg({target:"enemy",dmg,mult}); setTimeout(()=>setFloatDmg(null),780);
@@ -513,7 +576,7 @@ function BattleScene({playerMon,wild,isTrainer,trainerLabel,onEnd}){
       let curP=pHp;
       if(playerMon.ability==="きんべん"){ const heal=Math.round(pStats.maxHp*0.06); curP=Math.min(pStats.maxHp,pHp+heal); setPHp(curP); addLog(`きんべん！ ${playerMon.name} の HPが ${heal} かいふく`); }
       setPhase("enemy"); enemyTurn(curP);
-    },230);
+    },isNenriki?NENRIKI_DURATION:230);
   };
   const tryCapture=()=>{if(phase!=="player")return;setPhase("anim");const ok=Math.random()<(1-wHp/wStats.maxHp)*0.7+0.15;addLog(ok?`${wild.name} と 顧問契約をむすんだ！`:`${wild.name} は けいやくを ことわった…`);if(ok){setPhase("end");setEnd("capture");return;}setPhase("enemy");enemyTurn(pHp);};
   const bg=TYPE_INFO[wild.type1]?.bg||"#EAF3DE";
@@ -532,6 +595,7 @@ function BattleScene({playerMon,wild,isTrainer,trainerLabel,onEnd}){
       `}</style>
       <div style={{borderRadius:"var(--border-radius-lg)",border:"0.5px solid var(--color-border-tertiary)",overflow:"hidden"}}>
         <div style={{background:bg,padding:"14px 18px",position:"relative",minHeight:184}}>
+          {nenrikiAnim&&<NenrikiAnimation onComplete={()=>setNenrikiAnim(false)}/>}
           {flash&&<div style={{position:"absolute",inset:0,background:"#fff",pointerEvents:"none",zIndex:5,animation:"fxFlash 0.22s ease-out forwards"}}/>}
           <div style={{position:"absolute",top:12,left:12,background:"var(--color-background-primary)",borderRadius:"var(--border-radius-md)",padding:"6px 10px",minWidth:150,border:"0.5px solid var(--color-border-tertiary)",zIndex:6}}>
             <div style={{display:"flex",gap:5,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}><span style={{fontWeight:500,fontSize:13}}>{wild.name}</span><span style={{fontSize:11,color:"var(--color-text-secondary)"}}>Lv.{wild.level}</span><TypeBadge type={wild.type1}/><TypeBadge type={wild.type2}/></div>
